@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Procesar Excel</title>
+
+<!-- Librería -->
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+
+<style>
+body {
+  font-family: Arial;
+  margin: 20px;
+}
+
+/* TABLA */
+.contenedor-tabla {
+  max-height: 320px; /* aprox 10 filas */
+  overflow-y: auto;
+  border: 1px solid #ccc;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+th {
+  background-color: #ee2323;
+  color: white;
+  padding: 6px;
+  position: sticky;
+  top: 0;
+}
+
+td {
+  border: 1px solid #ddd;
+  padding: 5px;
+}
+
+/* LOADING */
+#loading {
+  display: none;
+  font-weight: bold;
+  color: #ee2323;
+}
+
+.dashboard {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* PANEL IZQUIERDO (cards verticales) */
+.panel-cards {
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* CARD ESTILO DASHBOARD */
+.card {
+  background: #f4f4f4;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0px 4px 10px rgba(0,0,0,0.15);
+}
+
+.card h3 {
+  font-size: 14px;
+  color: #555;
+}
+
+.card p {
+  font-size: 22px;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+/* COLORES POR ESTADO */
+#totalAuto { color: #f1c40f; }
+#totalPendiente { color: #e67e22; }
+#totalCierra { color: #29a012; }
+
+</style>
+</head>
+
+<body>
+
+<h2>Subir archivo Excel</h2>
+
+
+<button onclick="abrirSite()" style="background:#ee2323;color:white;padding:10px;border:none;border-radius:5px;">
+  SITE
+</button>
+
+<!-- ✅ SOLO ESTA PARTE VA EN SITE -->
+<div id="pantallaSite" style="
+display:none;
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:white;
+z-index:9999;
+padding:20px;
+overflow:auto;
+">
+  <h2>Tabla2</h2>
+
+  <div class="contenedor-tabla">
+    <table id="tabla2"></table>
+  </div>
+
+  <br>
+  <button onclick="cerrarSite()">Cerrar</button>
+</div>
+
+
+<input type="file" id="fileInput" accept=".xlsx">
+<br><br>
+
+<div id="loading">Procesando archivo... ⏳</div>
+
+<br>
+
+<b id="total"></b>
+<br><br>
+
+<button onclick="descargar()">Descargar Excel completo</button>
+
+<br><br>
+
+<br>
+
+<label>Fecha inicio:</label>
+<input type="date" id="fechaInicio">
+
+<label>Fecha fin:</label>
+<input type="date" id="fechaFin">
+
+<button onclick="filtrarPorFecha()">Filtrar</button>
+<br><br>
+
+<br><br>
+
+<div class="contenedor-tabla">
+  <table id="tabla"></table>
+</div>
+<br>
+
+<div class="dashboard">
+
+  <!-- PANEL IZQUIERDO -->
+  <div class="panel-cards">
+    <div class="card">
+      <h3>Pendiente Auto</h3>
+      <p id="totalAuto">0</p>
+    </div>
+
+    <div class="card">
+      <h3>Pendiente</h3>
+      <p id="totalPendiente">0</p>
+    </div>
+
+    <div class="card">
+      <h3>Cierra</h3>
+      <p id="totalCierra">0</p>
+    </div>
+  </div>
+
+ <!-- GRAFICO -->
+  <div style="flex: 1;">
+    <canvas id="graficoAsesores"></canvas>
+  </div>
+
+</div>
+
+<br><br>
+
+<div style="width:100%;">
+  <canvas id="graficoHoras"></canvas>
+</div>
+
+<script>
+
+let dataProcesada = [];
+let dataOriginal = [];
+let tabla2 = []; // ✅ ESTA TE FALTABA
+
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+
+  document.getElementById("loading").style.display = "block";
+
+  setTimeout(() => {
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      let json = XLSX.utils.sheet_to_json(sheet);
+      dataOriginal = json; 
+
+      dataProcesada = json.map(row => {
+
+        let texto = (row.Texto || "").toLowerCase();
+
+        // USUARIO
+        let usuario = "";
+        let match = texto.match(/([a-z0-9._%+-]+)@/);
+        if (match) usuario = match[1];
+
+        // ESTADO
+        let estado = "";
+        if (texto.includes("pendiente auto")) {
+          estado = "pendiente auto";
+        } else if (texto.includes("pendiente")) {
+          estado = "pendiente";
+        } else if (texto.includes("cierra")) {
+          estado = "cierra";
+        }
+
+        // ELIMINAR COLUMNAS NO DESEADAS
+        delete row.Hora;
+        delete row.DetalleError;
+        delete row.FechaDate;
+
+        return {
+          ...row,
+          Usuario: usuario,
+          Estado: estado
+        };
+      });
+
+      // ✅ Obtener fechas min y max del archivo
+let fechas = dataProcesada
+  .map(r => convertirFecha(r.Fecha))
+  .filter(f => f !== null);
+
+let minFecha = new Date(Math.min(...fechas));
+let maxFecha = new Date(Math.max(...fechas));
+
+// Formato YYYY-MM-DD
+function formatInputDate(date) {
+  let year = date.getFullYear();
+  let month = String(date.getMonth() + 1).padStart(2, "0");
+  let day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+
+// Asignar a inputs
+document.getElementById("fechaInicio").value = formatInputDate(minFecha);
+document.getElementById("fechaFin").value = formatInputDate(maxFecha);
+
+// Limitar calendario
+document.getElementById("fechaInicio").min = formatInputDate(minFecha);
+document.getElementById("fechaInicio").max = formatInputDate(maxFecha);
+document.getElementById("fechaFin").min = formatInputDate(minFecha);
+document.getElementById("fechaFin").max = formatInputDate(maxFecha);
+
+      
+// ✅ ✅ PEGA ESTO JUSTO AQUÍ
+
+let totalAuto = 0;
+let totalPendiente = 0;
+let totalCierra = 0;
+
+dataProcesada.forEach(row => {
+  if (row.Estado === "pendiente auto") totalAuto++;
+  if (row.Estado === "pendiente") totalPendiente++;
+  if (row.Estado === "cierra") totalCierra++;
+});
+
+document.getElementById("totalAuto").innerText = totalAuto;
+document.getElementById("totalPendiente").innerText = totalPendiente;
+document.getElementById("totalCierra").innerText = totalCierra;
+crearGrafico(dataProcesada);
+crearGraficoHoras(dataProcesada);
+
+      
+        
+      mostrarTabla(dataProcesada.slice(0, 100));
+
+      document.getElementById("total").innerText =
+        "Total registros: " + dataProcesada.length;
+
+      document.getElementById("loading").style.display = "none";
+    };
+
+    reader.readAsArrayBuffer(e.target.files[0]);
+
+  }, 100); // pequeño delay para mostrar loader
+});
+
+
+function mostrarTabla(data) {
+  const tabla = document.getElementById("tabla");
+  tabla.innerHTML = "";
+
+  if (data.length === 0) return;
+
+  let headers = Object.keys(data[0]);
+
+  let thead = "<tr>";
+  headers.forEach(h => thead += `<th>${h}</th>`);
+  thead += "</tr>";
+
+  let rows = data.map(row => {
+    return "<tr>" + headers.map(h => `<td>${row[h] || ""}</td>`).join("") + "</tr>";
+  }).join("");
+
+  tabla.innerHTML = thead + rows;
+}
+
+
+function descargar() {
+  const ws = XLSX.utils.json_to_sheet(dataProcesada);
+  const wb = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(wb, ws, "Reporte");
+  XLSX.writeFile(wb, "Reporte_Procesado.xlsx");
+}
+
+
+function convertirFecha(fechaTexto) {
+  if (!fechaTexto) return null;
+
+  let [fechaParte, horaParte] = fechaTexto.split(" ");
+  let [dia, mes, anio] = fechaParte.split("/");
+
+  return new Date(
+    parseInt(anio),
+    parseInt(mes) - 1,
+    parseInt(dia)
+  );
+}
+
+function formatearFechaSimple(fechaTexto) {
+  if (!fechaTexto) return "";
+
+  let fechaParte = fechaTexto.split(" ")[0]; // 09/05/2026
+  let [dia, mes, anio] = fechaParte.split("/");
+
+  return `${anio}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+}
+
+function filtrarPorFecha() {
+
+  let inicio = document.getElementById("fechaInicio").value;
+  let fin = document.getElementById("fechaFin").value;
+
+  let datosFiltrados;
+
+  // ✅ SI NO HAY FECHAS → usar TODOS los datos
+  if (!inicio || !fin) {
+    datosFiltrados = dataProcesada;
+  } else {
+    datosFiltrados = dataProcesada.filter(row => {
+      let fechaRow = formatearFechaSimple(row.Fecha);
+      return fechaRow >= inicio && fechaRow <= fin;
+    });
+  }
+
+  // ✅ SIEMPRE actualizar todo
+  mostrarTabla(datosFiltrados.slice(0, 100));
+  actualizarCards(datosFiltrados);
+  crearGrafico(datosFiltrados);
+  crearGraficoHoras(datosFiltrados);
+
+  document.getElementById("total").innerText =
+    "Total registros: " + datosFiltrados.length;
+}
+
+function actualizarCards(data) {
+
+  let totalAuto = 0;
+  let totalPendiente = 0;
+  let totalCierra = 0;
+
+  data.forEach(row => {
+    if (row.Estado === "pendiente auto") totalAuto++;
+    if (row.Estado === "pendiente") totalPendiente++;
+    if (row.Estado === "cierra") totalCierra++;
+  });
+
+  document.getElementById("totalAuto").innerText = totalAuto;
+  document.getElementById("totalPendiente").innerText = totalPendiente;
+  document.getElementById("totalCierra").innerText = totalCierra;
+}
+
+function generarDatosGrafico(data) {
+
+  let asesores = {};
+
+  data.forEach(row => {
+    let usuario = row.Usuario || "Sin usuario";
+
+    if (!asesores[usuario]) {
+      asesores[usuario] = {
+        auto: 0,
+        pendiente: 0,
+        cierra: 0
+      };
+    }
+
+if (row.Estado === "pendiente auto") asesores[usuario].auto = (asesores[usuario].auto || 0) + 1;
+if (row.Estado === "pendiente") asesores[usuario].pendiente = (asesores[usuario].pendiente || 0) + 1;
+if (row.Estado === "cierra") asesores[usuario].cierra = (asesores[usuario].cierra || 0) + 1;
+
+  });
+
+  // ✅ Convertir a array con total
+  let lista = Object.entries(asesores).map(([usuario, valores]) => {
+    let total =
+  Number(valores.auto || 0) +
+  Number(valores.pendiente || 0) +
+  Number(valores.cierra || 0);
+
+    return {
+      usuario,
+      ...valores,
+      total
+    };
+  });
+
+  // ✅ FILTRA (opcional: evita usuarios en 0)
+  lista = lista.filter(x => x.total > 0);
+
+  // ✅ ORDEN DESCENDENTE SEGURO
+ 
+
+
+lista.sort((a, b) => {
+  return (
+    (b.auto + b.pendiente + b.cierra) -
+    (a.auto + a.pendiente + a.cierra)
+  );
+});
+
+console.log("LISTA ORDENADA:", lista);
+
+
+  return {
+    labels: lista.map(x => x.usuario),
+    auto: lista.map(x => x.auto),
+    pendiente: lista.map(x => x.pendiente),
+    cierra: lista.map(x => x.cierra)
+  };
+}
+
+let grafico = null;
+
+function crearGrafico(data) {
+
+  // ✅ eliminar canvas viejo completamente
+  let canvasViejo = document.getElementById('graficoAsesores');
+  if (canvasViejo) {
+    canvasViejo.remove();
+  }
+
+  // ✅ crear canvas nuevo
+  let nuevoCanvas = document.createElement("canvas");
+  nuevoCanvas.id = "graficoAsesores";
+   
+ let contenedor = document.querySelector(".dashboard > div:nth-child(2)");
+ contenedor.innerHTML = ""; // limpia el gráfico viejo
+contenedor.appendChild(nuevoCanvas);
+
+
+  let ctx = nuevoCanvas.getContext('2d');
+
+  let datos = generarDatosGrafico(data);
+
+  console.log("ORDEN FINAL:", datos.labels);
+
+  grafico = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: datos.labels,
+      datasets: [
+        {
+          label: 'Pendiente Auto',
+          data: datos.auto,
+          backgroundColor: '#f1c40f'
+        },
+        {
+          label: 'Pendiente',
+          data: datos.pendiente,
+          backgroundColor: '#e67e22'
+        },
+        {
+          label: 'Cierra',
+          data: datos.cierra,
+          backgroundColor: '#e74c3c'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        x: {
+          stacked: true
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true
+        }
+      }
+    }
+  });
+}
+
+let graficoHoras;
+
+function crearGraficoHoras(data) {
+
+  let canvas = document.getElementById('graficoHoras');
+
+  // ✅ Validación (evita errores si no encuentra el canvas)
+  if (!canvas) {
+    console.error("No existe el canvas graficoHoras");
+    return;
+  }
+
+  let ctx = canvas.getContext('2d');
+
+  let datos = generarDatosPorHora(data);
+
+  // borrar gráfico anterior
+  if (graficoHoras) {
+    graficoHoras.destroy();
+  }
+
+  graficoHoras = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: datos.labels,
+      datasets: [
+        {
+          label: 'Pendiente Auto',
+          data: datos.auto,
+          borderColor: '#f1c40f',
+          backgroundColor: '#f1c40f33',
+          fill: true,
+          tension: 0.3
+        },
+        {
+          label: 'Pendiente',
+          data: datos.pendiente,
+          borderColor: '#e67e22',
+          backgroundColor: '#e67e2233',
+          fill: true,
+          tension: 0.3
+        },
+        {
+          label: 'Cierra',
+          data: datos.cierra,
+          borderColor: '#e74c3c',
+          backgroundColor: '#e74c3c33',
+          fill: true,
+          tension: 0.3
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'top'
+        }
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Hora del día (0 - 23)'
+          }
+        },
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Cantidad'
+          }
+        }
+      }
+    }
+  });
+}
+
+function generarDatosPorHora(data) {
+
+  let horas = {};
+
+  // Inicializar 0–23
+  for (let i = 0; i < 24; i++) {
+    horas[i] = {
+      auto: 0,
+      pendiente: 0,
+      cierra: 0
+    };
+  }
+
+  data.forEach(row => {
+    if (!row.Fecha) return;
+
+    // extraer hora
+    let partes = row.Fecha.split(" ");
+    if (partes.length < 2) return;
+
+    let hora = partes[1].split(":")[0]; // "14:23:10" → 14
+    hora = parseInt(hora);
+
+    if (isNaN(hora)) return;
+
+    if (row.Estado === "pendiente auto") horas[hora].auto++;
+    if (row.Estado === "pendiente") horas[hora].pendiente++;
+    if (row.Estado === "cierra") horas[hora].cierra++;
+  });
+
+  let labels = Object.keys(horas);
+
+  let auto = labels.map(h => horas[h].auto);
+  let pendiente = labels.map(h => horas[h].pendiente);
+  let cierra = labels.map(h => horas[h].cierra);
+
+  return { labels, auto, pendiente, cierra };
+}
+
+async function cargarTabla2DesdeGoogle() {
+  const url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQRcU_5O6yTR9kqkK7bvKOm9ujS2-64f-WvCSQIziijtqNphg8yVJkUsDdZR3rOCxw6yYU6HjdrRg/pub?gid=0&single=true&output=csv";
+
+  try {
+    let res = await fetch(url);
+    let texto = await res.text();
+
+    let filas = texto.split("\n").map(f => f.split(","));
+
+    let headers = filas[0];
+
+    tabla2 = filas.slice(1).map(fila => ({
+      Operador: fila[0],
+      Supervisor: fila[1],
+      Sitio: fila[2]
+    }));
+
+    mostrarTabla2(tabla2);
+
+    console.log("Tabla2 cargada desde Google ✅");
+
+  } catch (error) {
+    console.error("Error cargando tabla2:", error);
+  }
+}
+
+
+window.onload = function () {
+  cargarTabla2DesdeGoogle();
+};
+
+function mostrarTabla2(data) {
+  const tabla = document.getElementById("tabla2");
+  tabla.innerHTML = "";
+
+  if (data.length === 0) return;
+
+  let headers = Object.keys(data[0]);
+
+  let thead = "<tr>";
+  headers.forEach(h => thead += `<th>${h}</th>`);
+  thead += "</tr>";
+
+  let rows = data.map(row => {
+    return "<tr>" + headers.map(h => `<td>${row[h] || ""}</td>`).join("") + "</tr>";
+  }).join("");
+
+  tabla.innerHTML = thead + rows;
+}
+
+function abrirSite() {
+  document.getElementById("pantallaSite").style.display = "block";
+}
+
+function cerrarSite() {
+  document.getElementById("pantallaSite").style.display = "none";
+}
+
+</script>
+
+</body>
+</html>
