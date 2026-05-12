@@ -147,6 +147,16 @@ overflow:auto;
 <input type="date" id="fechaFin">
 
 <button onclick="filtrarPorFecha()">Filtrar</button>
+
+
+<br><br>
+
+<label><b>Filtrar por Supervisor:</b></label>
+<div id="filtroSupervisor"></div>
+
+<br>
+
+
 <br><br>
 
 <br><br>
@@ -243,6 +253,7 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
       });
 
       cruzarDatos(); // ✅ AQUÍ EXACTAMENTE
+      generarFiltroSupervisor(); // ✅ esto crea los checkboxes
 
       // ✅ Obtener fechas min y max del archivo
 let fechas = dataProcesada
@@ -719,6 +730,47 @@ function cruzarDatos() {
 
   });
 
+}
+
+function generarFiltroSupervisor() {
+
+  let contenedor = document.getElementById("filtroSupervisor");
+  contenedor.innerHTML = "";
+
+  let supervisoresUnicos = [...new Set(
+    dataProcesada.map(r => r.Supervisor).filter(x => x && x !== "No encontrado")
+  )];
+
+  supervisoresUnicos.sort();
+
+  supervisoresUnicos.forEach(sup => {
+    contenedor.innerHTML += `
+      <label>
+        <input type="checkbox" value="${sup}" checked onchange="filtrarSupervisor()">
+        ${sup}
+      </label><br>
+    `;
+  });
+
+}
+function filtrarSupervisor() {
+
+  let checkboxes = document.querySelectorAll('#filtroSupervisor input:checked');
+
+  let seleccionados = Array.from(checkboxes).map(cb => cb.value);
+
+  let datosFiltrados = dataProcesada.filter(row =>
+    seleccionados.includes(row.Supervisor)
+  );
+
+  // ✅ actualizar TODO
+  mostrarTabla(datosFiltrados.slice(0, 100));
+  actualizarCards(datosFiltrados);
+  crearGrafico(datosFiltrados);
+  crearGraficoHoras(datosFiltrados);
+
+  document.getElementById("total").innerText =
+    "Total registros: " + datosFiltrados.length;
 }
 
 </script>
