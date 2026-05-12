@@ -242,6 +242,8 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
         };
       });
 
+      cruzarDatos(); // ✅ AQUÍ EXACTAMENTE
+
       // ✅ Obtener fechas min y max del archivo
 let fechas = dataProcesada
   .map(r => convertirFecha(r.Fecha))
@@ -695,6 +697,28 @@ function abrirSite() {
 
 function cerrarSite() {
   document.getElementById("pantallaSite").style.display = "none";
+}
+
+function cruzarDatos() {
+
+  dataProcesada.forEach(row => {
+
+    let agente = (row["Agente"] || "").toLowerCase().trim();
+
+    let match = tabla2.find(t =>
+      (t.Operador || "").toLowerCase().trim() === agente
+    );
+
+    if (match) {
+      row.Supervisor = match.Supervisor;
+      row.Sitio = match.Sitio;
+    } else {
+      row.Supervisor = "No encontrado";
+      row.Sitio = "No encontrado";
+    }
+
+  });
+
 }
 
 </script>
